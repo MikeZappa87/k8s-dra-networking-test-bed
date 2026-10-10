@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: veth-dra-driver
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: veth-dra-driver
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get]
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get]
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: veth-dra-driver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: veth-dra-driver
+subjects:
+  - kind: ServiceAccount
+    name: veth-dra-driver
+    namespace: kube-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: veth-dra-driver
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: veth-dra-driver
+  # Never run two instances against the same node's fixed registration socket.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  template:
+    metadata:
+      labels:
+        app: veth-dra-driver
+    spec:
+      serviceAccountName: veth-dra-driver
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: driver
+          image: veth-dra-driver:dev
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsNonRoot: false
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: registration
+              mountPath: /var/lib/kubelet/plugins_registry
+            - name: plugin
+              mountPath: /var/lib/kubelet/plugins/veth.dra.example.com
+            # containerd netns_path is typically /var/run/netns/cni-*. On Linux
+            # /var/run is a symlink to /run; preserve that path inside the driver.
+            - name: netns
+              mountPath: /var/run/netns
+              mountPropagation: HostToContainer
+      volumes:
+        - name: registration
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: DirectoryOrCreate
+        - name: plugin
+          hostPath:
+            path: /var/lib/kubelet/plugins/veth.dra.example.com
+            type: DirectoryOrCreate
+        - name: netns
+          hostPath:
+            path: /var/run/netns
+            type: DirectoryOrCreate
+---
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: veth
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == 'veth.dra.example.com'

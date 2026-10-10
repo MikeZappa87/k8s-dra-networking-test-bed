@@ -1,0 +1,4 @@
+FROM gcr.io/distroless/static:nonroot
+COPY bin/veth-dra-driver /veth-dra-driver
+# The DaemonSet overrides this to root and grants namespace/network privileges.
+ENTRYPOINT ["/veth-dra-driver"]
