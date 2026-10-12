@@ -29,6 +29,11 @@ var _ kubeletplugin.DRAPlugin = (*driver)(nil)
 // Unimplemented, which the kubelet treats as unsupported rather than fatal.
 var _ kubeletplugin.PodResourceConfigurer = (*driver)(nil)
 
+// PodResourceUnconfigurer is an optional extension to DRAPlugin. Drivers which
+// omit it retain the base DRA contract; the helper reports this RPC as
+// Unimplemented, which the kubelet treats as unsupported rather than fatal.
+//var _ kubeletplugin.PodResourceUnconfigurer = (*driver)(nil)
+
 func (d *driver) PrepareResourceClaims(ctx context.Context, claims []*resourceapi.ResourceClaim) (map[types.UID]kubeletplugin.PrepareResult, error) {
 	results := make(map[types.UID]kubeletplugin.PrepareResult, len(claims))
 	for _, claim := range claims {
@@ -38,7 +43,7 @@ func (d *driver) PrepareResourceClaims(ctx context.Context, claims []*resourceap
 	return results, nil
 }
 
-func (d *driver) ConfigurePodResources(ctx context.Context, claims []*resourceapi.ResourceClaim, sandbox *drapb.Sandbox) (map[types.UID]kubeletplugin.ConfigureResult, error) {
+func (d *driver) ConfigurePodResources(ctx context.Context, claims []*resourceapi.ResourceClaim, pod *drapb.PodMetadata, sandbox *drapb.Sandbox) (map[types.UID]kubeletplugin.ConfigureResult, error) {
 	if sandbox.GetNetnsPath() == "" {
 		return nil, fmt.Errorf("sandbox netns_path is required")
 	}
@@ -180,6 +185,10 @@ func configureLink(handle *netlink.Handle, link netlink.Link, mtu int, address s
 func isLinkNotFound(err error) bool {
 	var notFound netlink.LinkNotFoundError
 	return errors.As(err, &notFound)
+}
+
+func (d *driver) UnconfigurePodResources(ctx context.Context, claims []kubeletplugin.NamespacedObject, sandbox *drapb.Sandbox) (result map[types.UID]error, err error) {
+	return d.UnprepareResourceClaims(ctx, claims)
 }
 
 func (d *driver) UnprepareResourceClaims(ctx context.Context, claims []kubeletplugin.NamespacedObject) (map[types.UID]error, error) {
