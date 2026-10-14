@@ -30,8 +30,9 @@ veth pair, allowing the next sandbox to recreate it.
 From the repository root, `make up` builds a kind node directly from your
 Kubernetes checkout, builds the driver image, creates the cluster, loads the
 driver image onto its nodes, and deploys the driver and DeviceClass. The root
-node Containerfile is no longer used; kind supplies the unmodified containerd.
-`make build` only builds the two images. For an existing cluster, use
+node Containerfile builds custom containerd and overlays its binaries onto the
+Kubernetes base image. `make build` builds the base, final node, and driver
+images. For an existing cluster, use
 `make driver-deploy` to rebuild, load, and restart the driver, including when
 reusing its development image tag. Override `NODE_IMAGE`, `DRIVER_IMAGE`,
 `CLUSTER_NAME`, or `ARCH` at the root as needed. `make test` runs unit tests,

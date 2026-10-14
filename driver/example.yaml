@@ -25,6 +25,8 @@ kind: Pod
 metadata:
   name: veth-demo
 spec:
+  defaultNetwork: None
+  dnsPolicy: None
   resourceClaims:
     - name: network
       resourceClaimName: veth-demo

@@ -64,7 +64,7 @@ func run(ctx context.Context, cancel context.CancelFunc, node string, count int,
 		kubeletplugin.DriverName(driverName), kubeletplugin.NodeName(node),
 		kubeletplugin.KubeClient(client), kubeletplugin.PluginDataDirectoryPath(pluginDir),
 		kubeletplugin.RegistrarDirectoryPath(registryDir),
-		kubeletplugin.NodeV1beta1(false), kubeletplugin.HealthService(false),
+		kubeletplugin.NodeV1(true), kubeletplugin.HealthService(false),
 	)
 	if err != nil {
 		return err

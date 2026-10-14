@@ -4,13 +4,19 @@ SHELL := /bin/bash
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 KUBERNETES_DIR ?= $(ROOT)/../kubernetes
 KUBERNETES_REPO ?= https://github.com/MikeZappa87/kubernetes.git
-KUBERNETES_BRANCH ?= mzappa/nodeconfigurepoddrapoc
+KUBERNETES_BRANCH ?= mzappa/nonnetworkpodsmain-nodeconfigurepoddrapoc
 VERSION_FILE ?= $(ROOT)/kubernetes-version.env
 ARCH ?= $(shell uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')
 KIND ?= $(shell command -v kind 2>/dev/null || printf '%s/bin/kind' "$$(go env GOPATH)")
 DOCKER ?= docker
 KUBECTL ?= kubectl
+KUBERNETES_IMAGE ?= dra-poc-kubernetes:dev
 NODE_IMAGE ?= dra-poc-node:dev
+CONTAINERD_REPO ?= https://github.com/MikeZappa87/containerd.git
+CONTAINERD_BRANCH ?= mzappa/nonnetworkpods
+CONTAINERD_COMMIT ?=
+GO_VERSION ?= 1.27.1
+BUILD_FLAGS ?=
 DRIVER_IMAGE ?= veth-dra-driver:dev
 GO ?= go
 CLUSTER_NAME ?= dra-poc
@@ -27,8 +33,8 @@ DRIVER_MAKE = $(MAKE) -C "$(ROOT)/driver" ARCH="$(ARCH)" GO="$(GO)" \
 help:
 	@printf '%s\n' \
 	  'make build             Build the custom kind node and DRA driver images' \
-	  'make node-image        Build a kind node directly from the Kubernetes checkout' \
-	  'make kubernetes-image  Alias for node-image (clones sources if missing)' \
+	  'make kubernetes-image  Build the kind base node from the Kubernetes checkout' \
+	  'make node-image        Build custom containerd over an existing base node image' \
 	  'make cluster           Create a cluster using the existing node image' \
 	  'make up                Build images, create cluster, load and deploy DRA driver' \
 	  'make driver-build      Compile the Linux DRA driver binary' \
@@ -44,7 +50,9 @@ help:
 	  'make delete            Delete the cluster (keep sources and images)' \
 	  '' \
 	  'Overrides: ARCH, KIND, KUBERNETES_DIR, VERSION_FILE, CLUSTER_NAME,' \
-	  '           NODE_IMAGE, DRIVER_IMAGE, GO, DOCKER, KUBECTL, WAIT'
+	  '           KUBERNETES_IMAGE, NODE_IMAGE, DRIVER_IMAGE, GO, DOCKER, KUBECTL, WAIT,' \
+	  '           CONTAINERD_REPO, CONTAINERD_BRANCH, CONTAINERD_COMMIT, GO_VERSION, BUILD_FLAGS' \
+	  'Refresh a moving containerd branch: make node-image BUILD_FLAGS=--no-cache'
 
 # Never reset, pull, or overwrite an existing source checkout.
 source:
@@ -55,13 +63,22 @@ source:
 	  git -C "$(KUBERNETES_DIR)" rev-parse --is-inside-work-tree >/dev/null; \
 	fi
 
-node-image: source
+kubernetes-image: source
 	KUBE_GIT_VERSION_FILE="$(abspath $(VERSION_FILE))" "$(KIND)" build node-image \
-	  "$(KUBERNETES_DIR)" --type source --arch "$(ARCH)" --image "$(NODE_IMAGE)"
+	  "$(KUBERNETES_DIR)" --type source --arch "$(ARCH)" --image "$(KUBERNETES_IMAGE)"
 
-kubernetes-image: node-image
+node-image:
+	@test "$(KUBERNETES_IMAGE)" != "$(NODE_IMAGE)" || { echo 'KUBERNETES_IMAGE and NODE_IMAGE must differ' >&2; exit 1; }
+	$(DOCKER) build $(BUILD_FLAGS) --platform "linux/$(ARCH)" \
+	  --build-arg BASE_IMAGE="$(KUBERNETES_IMAGE)" --build-arg GO_VERSION="$(GO_VERSION)" \
+	  --build-arg CONTAINERD_REPO="$(CONTAINERD_REPO)" \
+	  --build-arg CONTAINERD_BRANCH="$(CONTAINERD_BRANCH)" \
+	  --build-arg CONTAINERD_COMMIT="$(CONTAINERD_COMMIT)" \
+	  -f "$(ROOT)/Containerfile" -t "$(NODE_IMAGE)" "$(ROOT)"
 
-build: node-image driver-image
+# Finish the Kubernetes base before the overlay, including under make -j.
+build: kubernetes-image driver-image
+	$(MAKE) node-image
 
 driver-build: source
 	+$(DRIVER_MAKE) build

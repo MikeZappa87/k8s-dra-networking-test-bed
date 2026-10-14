@@ -17,7 +17,7 @@ the driver and node must be built against the compatible Kubernetes fork.
 
 The default source repository is
 [MikeZappa87/kubernetes](https://github.com/MikeZappa87/kubernetes), branch
-`mzappa/nodeconfigurepoddrapoc`, checked out alongside this repository as
+`mzappa/nonnetworkpodsmain-nodeconfigurepoddrapoc`, checked out alongside this repository as
 `../kubernetes`. `make source` clones it if missing; an existing checkout is
 **never pulled, reset, or switched to another branch**. Ensure an existing
 checkout contains the intended changes before building.
@@ -31,7 +31,7 @@ source location.
 
 Run `make up` from the repository root. It:
 
-1. Builds a kind node image directly from the Kubernetes checkout.
+1. Builds a kind base node image from Kubernetes, then overlays custom containerd.
 2. Compiles the Linux driver and builds its container image.
 3. Creates the `dra-poc` cluster with one control-plane node and one worker.
 4. Loads the driver image into the cluster's nodes.
@@ -58,8 +58,8 @@ development image tag.
 | `make help` | List targets and supported overrides. |
 | `make source` | Clone Kubernetes if the checkout is missing. |
 | `make build` | Build both images without creating a cluster. |
-| `make node-image` | Build the custom Kubernetes kind node image. |
-| `make kubernetes-image` | Alias for `node-image`. |
+| `make kubernetes-image` | Build the kind base node image from Kubernetes source. |
+| `make node-image` | Build containerd and overlay it onto the existing base node image. |
 | `make cluster` | Create a cluster using the existing node image. |
 | `make up` | Build images, create the cluster, and deploy the driver. |
 | `make driver-build` | Compile the Linux driver binary. |
@@ -87,8 +87,14 @@ To remove only the example pod and claim, run `make -C driver clean`.
 | --- | --- | --- |
 | `KUBERNETES_DIR` | Sibling `../kubernetes` checkout | Kubernetes source used for the node build. |
 | `KUBERNETES_REPO` | `https://github.com/MikeZappa87/kubernetes.git` | Repository cloned when sources are missing. |
-| `KUBERNETES_BRANCH` | `mzappa/nodeconfigurepoddrapoc` | Branch used for a new clone. |
+| `KUBERNETES_BRANCH` | `mzappa/nonnetworkpodsmain-nodeconfigurepoddrapoc` | Branch used for a new clone. |
+| `KUBERNETES_IMAGE` | `dra-poc-kubernetes:dev` | Kubernetes base image built by kind. |
 | `NODE_IMAGE` | `dra-poc-node:dev` | Custom kind node image. |
+| `CONTAINERD_REPO` | `https://github.com/MikeZappa87/containerd.git` | Runtime fork cloned inside the build container. |
+| `CONTAINERD_BRANCH` | `mzappa/nonnetworkpods` | Runtime branch to build. |
+| `CONTAINERD_COMMIT` | Empty | Optional commit to pin instead of building the branch tip. |
+| `GO_VERSION` | `1.27.1` | Go builder image version for containerd. |
+| `BUILD_FLAGS` | Empty | Extra Docker build flags for the runtime overlay. |
 | `DRIVER_IMAGE` | `veth-dra-driver:dev` | Driver image built and loaded into kind. |
 | `CLUSTER_NAME` | `dra-poc` | Cluster name; kubectl uses context `kind-<name>`. |
 | `ARCH` | Host architecture, normalized to `arm64` or `amd64` | Target Linux image and binary architecture. |
@@ -105,8 +111,8 @@ the source you intend to build, or supply another file via `VERSION_FILE`.
 ## Project layout
 
 - [Makefile](Makefile): source builds, cluster lifecycle, and driver orchestration.
-- [kind.yaml](kind.yaml): two-node cluster with default CNI enabled; currently
-  no explicit feature-gate overrides.
+- [kind.yaml](kind.yaml): two-node cluster with default CNI and PodDefaultNetwork enabled.
+- [Containerfile](Containerfile): builds custom containerd and overlays its binaries.
 - [kubernetes-version.env](kubernetes-version.env): Kubernetes build version metadata.
 - [driver/README.md](driver/README.md): driver lifecycle, opaque configuration,
   runtime namespace requirements, and limitations.
@@ -114,8 +120,27 @@ the source you intend to build, or supply another file via `VERSION_FILE`.
 - [driver/example.yaml](driver/example.yaml): claim configuration and consuming pod.
 - [driver/Containerfile](driver/Containerfile): packages the compiled driver.
 
-The node image is built entirely by kind, which supplies containerd. No custom
-containerd build or root-level Containerfile overlay is needed.
+## Custom containerd
+
+kind builds `KUBERNETES_IMAGE` from your Kubernetes checkout. The root
+[Containerfile](Containerfile) compiles the containerd fork inside Linux for
+`ARCH`, then replaces `containerd`, `ctr`, and `containerd-shim-runc-v2` in the
+final `NODE_IMAGE`. Kubernetes binaries, kind's entrypoint, runtime configuration,
+CNI, and preloaded control-plane images are inherited from the base image.
+The image names must differ. No local containerd checkout is required.
+
+`make build` orders these stages correctly; `make up` then creates the cluster
+from the final image. After changing only containerd, use `make node-image` to
+reuse the existing Kubernetes base instead of rebuilding Kubernetes. Supply
+`CONTAINERD_BRANCH` for another branch or `CONTAINERD_COMMIT` for reproducibility.
+Docker may cache a branch clone even after its remote tip moves; use
+`make node-image BUILD_FLAGS=--no-cache` to refresh it. Changing a pinned commit
+invalidates the source build layer automatically.
+
+Replacing the image does not update existing nodes. Recreate the kind cluster
+to use the new runtime. The configured Go version must meet the selected
+containerd branch's requirements, and its runtime configuration must remain
+compatible with kind's base image.
 
 ## Scope and safety
 
